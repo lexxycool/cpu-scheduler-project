@@ -63,5 +63,42 @@ int main(int argc, char *argv[])
 /* COMPLETE THE IMPLEMENTATION */
 void CPUScheduler(virConnectPtr conn, int interval)
 {
-	
-}// git test change
+    // List all running domains
+    virDomainPtr *domains = NULL;
+    int num_domains = virConnectListAllDomains(conn, &domains, 0);
+    if (num_domains < 1) {
+        printf("No running domains found.\n");
+        return;
+    }
+
+    // Get number of physical CPUs
+    int num_pcpus = virNodeGetInfo(conn, NULL) == 0 ? 4 : 4; // fallback to 4
+    virNodeInfo nodeinfo;
+    virNodeGetInfo(conn, &nodeinfo);
+    num_pcpus = nodeinfo.cpus;
+
+    // For each domain, pin vCPU 0 round-robin across pCPUs
+    for (int i = 0; i < num_domains; i++) {
+        virDomainPtr dom = domains[i];
+        int pcpu = i % num_pcpus;
+
+        // Create pinning tuple (all False except target pCPU)
+        unsigned char *cpumap = malloc(VIR_CPU_MAPLEN(num_pcpus));
+        memset(cpumap, 0, VIR_CPU_MAPLEN(num_pcpus));
+        VIR_USE_CPU(cpumap, pcpu);
+
+        // Pin vCPU 0 to pCPU
+        if (virDomainPinVcpu(dom, 0, cpumap, VIR_CPU_MAPLEN(num_pcpus)) == -1) {
+            fprintf(stderr, "Failed to pin vCPU 0 of %s\n", virDomainGetName(dom));
+        }
+
+        free(cpumap);
+    }
+
+    // Free domains
+    for (int i = 0; i < num_domains; i++) {
+        virDomainFree(domains[i]);
+    }
+    free(domains);	
+}
+
